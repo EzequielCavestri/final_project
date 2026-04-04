@@ -3,6 +3,6 @@ Repository for the final project of the Electronic Engineering degree at UTN FRC
 
 Members:
 
-Maidana Juliana
-Gatti Ignacio
-Cavestri Ezequiel
+- Maidana Juliana
+- Gatti Ignacio
+- Cavestri Ezequiel
