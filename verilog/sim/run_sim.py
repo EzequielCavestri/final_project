@@ -103,7 +103,8 @@ def run_sweep():
     mask    = sigmas > 0
     sig_rtl = sigmas[mask]
     ber_rtl = bers[mask]
-    ebno_db = 10 * np.log10(8100 / (4 * sig_rtl**2))
+    ebno_db = 10 * np.log10(8100 / (8 * sig_rtl**2))
+
 
     # Curva teorica QPSK en AWGN (sin ISI, como referencia)
     ebno_teo = np.linspace(0, 30, 300)
