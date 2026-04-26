@@ -1,0 +1,6 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1776654243" />
+    <testcase name="ber_convergencia" classname="test_top" file="C:\Users\JulianaMaidana\final_project\verilog\sim\test_top.py" lineno="55" time="11623.55175280571" sim_time_ns="2000200.0" ratio_time="172.08165305558938" />
+  </testsuite>
+</testsuites>
