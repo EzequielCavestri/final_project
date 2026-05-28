@@ -10,10 +10,10 @@ import numpy as np
 # ============================================================
 # MODO DE OPERACION — cambiá estas variables
 # ============================================================
-MODO_BER          = False   # True = corre sweep BER (tarda ~90 min)
+MODO_BER          = True   # True = corre sweep BER (tarda ~90 min)
 MODO_CONSTELACION = True    # True = genera constelacion
 MODO_COEFICIENTES = True    # True = genera convergencia de taps
-SIGMA_FIJO        = 8       # sigma usado cuando MODO_BER=False
+SIGMA_FIJO        = 4       # sigma usado cuando MODO_BER=False
 # ============================================================
 
 def prbs9(seed, n_bits):
@@ -90,7 +90,7 @@ async def ber_convergencia(dut):
     dut.rst.value = 1
     dut.enable_div.value = 1
     dut.sigma_scale.value = sigma
-    await Timer(200, unit="ns")
+    await Timer(2000, unit="us")
     dut.rst.value = 0
 
     # Lanza coroutines según modo

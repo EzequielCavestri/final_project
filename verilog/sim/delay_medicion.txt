@@ -1,0 +1,35 @@
+=== FFT_out start times (primeros 10) ===
+  [0] t=980ns
+  [1] t=1300ns
+  [2] t=1620ns
+  [3] t=1940ns
+  [4] t=2260ns
+  [5] t=2580ns
+  [6] t=2900ns
+  [7] t=3220ns
+  [8] t=3540ns
+  [9] t=3860ns
+
+=== FFTE_out start times (primeros 10) ===
+  [0] t=2180ns
+  [1] t=2500ns
+  [2] t=2820ns
+  [3] t=3140ns
+  [4] t=3460ns
+  [5] t=3780ns
+  [6] t=4100ns
+  [7] t=4420ns
+  [8] t=4740ns
+  [9] t=5060ns
+
+=== DELAYS entre frames correspondientes ===
+  Frame 0: delay=1200ns = 120 ciclos clk_fast
+  Frame 1: delay=1200ns = 120 ciclos clk_fast
+  Frame 2: delay=1200ns = 120 ciclos clk_fast
+  Frame 3: delay=1200ns = 120 ciclos clk_fast
+  Frame 4: delay=1200ns = 120 ciclos clk_fast
+  Frame 5: delay=1200ns = 120 ciclos clk_fast
+  Frame 6: delay=1200ns = 120 ciclos clk_fast
+  Frame 7: delay=1200ns = 120 ciclos clk_fast
+  Frame 8: delay=1200ns = 120 ciclos clk_fast
+  Frame 9: delay=1200ns = 120 ciclos clk_fast

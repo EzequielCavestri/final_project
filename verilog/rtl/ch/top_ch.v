@@ -37,10 +37,15 @@ module top_ch #(
         // Canal ISI 3 taps: h[5]=45, h[6]=110 (tap principal), h[7]=45 en Q7
     // Ratio |H|max/|H|min = 10x — ISI moderada, manejable en Q17.10
    
+   
+   //parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
+    //9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd45, 9'sd110,
+    //9'sd45, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
+  //},
    parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
-    9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd60, 9'sd80,
-    9'sd60, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
-   },
+        9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd110,
+        9'sd45, 9'sd30, 9'sd0, 9'sd0, 9'sd0, 9'sd0
+  },
 
     parameter [L_CH*CWIDTH-1:0] H_IMAG_INIT = {L_CH{9'sd0}}
 

@@ -68,8 +68,8 @@ module slicer_qpsk #(
     //   1/sqrt(2) * 2^7 = 0.70711 * 128 = 90.51 -> round_even -> 91
     //   91 / 128 = 0.7109 (error < 0.5 LSB)
     // ============================================================
-    localparam signed [NB_W-1:0] QPSK_A     =  9'sd91;
-    localparam signed [NB_W-1:0] QPSK_A_NEG = -9'sd91;
+    localparam signed [NB_W-1:0] QPSK_A     =  9'sd90;
+    localparam signed [NB_W-1:0] QPSK_A_NEG = -9'sd90;
 
     // ============================================================
     // Saturación del error en NB_W bits

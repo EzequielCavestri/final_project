@@ -10,7 +10,7 @@ from math import erfc as _erfc
 # ============================================================
 # MODO DE OPERACION — cambiá esto según lo que necesites
 # ============================================================
-MODO_BER = False   # True = sweep completo (~90 min) | False = una sim rapida
+MODO_BER = True   # True = sweep completo (~90 min) | False = una sim rapida
 SIGMA_FIJO = 4     # sigma usado cuando MODO_BER=False
 # ============================================================
 
@@ -78,7 +78,8 @@ def run():
         if results_file.exists():
             results_file.unlink()
 
-        sigma_values = [0, 2, 4, 6, 8, 12, 16, 24, 32]
+        #sigma_values = [0, 2, 4, 6, 8, 12, 16, 24, 32]
+        sigma_values = [8]
         print(f"\n=== SWEEP BER: sigma={sigma_values} ===\n")
 
         for sigma in sigma_values:
