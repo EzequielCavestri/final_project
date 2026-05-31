@@ -8,37 +8,23 @@
 //   w_new[k] = sat( w_old[k] + (grad_t[k] >>> mu_sh_eff) )
 //
 // mu_sh_eff conmuta automáticamente:
-//   frames 0 .. N_SWITCH-1  →  MU_SH_INIT   (convergencia rápida)
-//   frames N_SWITCH .. inf  →  MU_SH_FINAL  (estado estable)
-//
-// Equivalencias con tu Python:
-//   MU_SH_INIT=6   → mu ≈ 0.0156  (Python MU_INIT  = 0.015)
-//   MU_SH_FINAL=8  → mu ≈ 0.0039  (Python MU_FINAL = 0.004)
-//   N_SWITCH=200   → igual que Python N_SWITCH = 200
+//   frames 0 .. N_SWITCH-1  →  i_mu_sh_init   (convergencia rápida)
+//   frames N_SWITCH .. inf  →  i_mu_sh_final  (estado estable)
 //
 // Arquitectura:
 //   - N=16 registros complejos Q(17,10), inicializados a cero
 //   - Read combinacional → Vivado infiere LUTRAM
 //   - Read-before-write garantizado en sim y síntesis
 //   - Latencia de salida: 1 ciclo
-//   - frame_cnt 8 bits, congela en N_SWITCH (sin overflow)
-//
-// Parámetros:
-//   NB_W        = 17
-//   NBF_W       = 10
-//   N           = 16
-//   MU_SH_INIT  = 6
-//   MU_SH_FINAL = 8
-//   N_SWITCH    = 200
+//   - frame_cnt ampliado a 16 bits para control desde VIO
 // ============================================================
 
 module update_lms #(
     parameter integer NB_W        = 17,
     parameter integer NBF_W       = 10,
-    parameter integer N           = 16,
-    parameter integer MU_SH_INIT  = 6,
-    parameter integer MU_SH_FINAL = 8,
-    parameter integer N_SWITCH    = 200
+    parameter integer N           = 16
+    // ELIMINADOS: MU_SH_INIT, MU_SH_FINAL, y N_SWITCH 
+    // Ahora entran por los puertos dinámicos.
 )(
     input  wire                    clk,
     input  wire                    rst,
@@ -49,15 +35,20 @@ module update_lms #(
     input  wire signed [NB_W-1:0]  i_gI,
     input  wire signed [NB_W-1:0]  i_gQ,
 
+    // Entradas de control en vivo (Desde el VIO en top_fpga)
+    input  wire [3:0]              i_mu_sh_init,
+    input  wire [3:0]              i_mu_sh_final,
+    input  wire [15:0]             i_n_switch,
+
     // Salida: w_new hacia ZERO_PAD_PESOS (N muestras por frame)
     output reg                     o_valid,
     output reg                     o_start,
     output reg  signed [NB_W-1:0]  o_wI,
     output reg  signed [NB_W-1:0]  o_wQ,
 
-    // Debug: estado del mu_switch (conectar a () si no se usa)
+    // Debug: estado del mu_switch 
     output wire                    o_switched,
-    output wire [7:0]              o_frame_cnt
+    output wire [15:0]             o_frame_cnt  // AMPLIADO a 16 bits
 );
 
     // ============================================================
@@ -83,8 +74,8 @@ module update_lms #(
     // ============================================================
     // mu_switch
     // ============================================================
-    reg [7:0] frame_cnt;
-    reg       switched;
+    reg [15:0] frame_cnt;  // AMPLIADO a 16 bits
+    reg        switched;
 
     assign o_switched  = switched;
     assign o_frame_cnt = frame_cnt;
@@ -101,18 +92,18 @@ module update_lms #(
     // Vivado sintetiza esto como un mux, no como shift variable
     // Costo: ~17 LUT2
     // ============================================================
-    // Truncacion hacia cero (sin sesgo):
-    //   +612 >>> 11 = 0   (igual que floor, OK)
-    //   -612 >>> 11 = -1  (floor), corregido a 0 con truncation-toward-zero
-    //   Implementacion: si negativo, negar → shift → negar
+    // AHORA USA LOS INPUTS (i_mu_sh_init e i_mu_sh_final) EN VEZ DE PARAMETERS
     wire signed [NB_W-1:0] mu_gI_fast = i_gI[NB_W-1] ?
-        -($signed(-i_gI) >>> MU_SH_INIT) : ($signed(i_gI) >>> MU_SH_INIT);
+        -($signed(-i_gI) >>> i_mu_sh_init) : ($signed(i_gI) >>> i_mu_sh_init);
+        
     wire signed [NB_W-1:0] mu_gI_slow = i_gI[NB_W-1] ?
-        -($signed(-i_gI) >>> MU_SH_FINAL) : ($signed(i_gI) >>> MU_SH_FINAL);
+        -($signed(-i_gI) >>> i_mu_sh_final) : ($signed(i_gI) >>> i_mu_sh_final);
+        
     wire signed [NB_W-1:0] mu_gQ_fast = i_gQ[NB_W-1] ?
-        -($signed(-i_gQ) >>> MU_SH_INIT) : ($signed(i_gQ) >>> MU_SH_INIT);
+        -($signed(-i_gQ) >>> i_mu_sh_init) : ($signed(i_gQ) >>> i_mu_sh_init);
+        
     wire signed [NB_W-1:0] mu_gQ_slow = i_gQ[NB_W-1] ?
-        -($signed(-i_gQ) >>> MU_SH_FINAL) : ($signed(i_gQ) >>> MU_SH_FINAL);
+        -($signed(-i_gQ) >>> i_mu_sh_final) : ($signed(i_gQ) >>> i_mu_sh_final);
 
     wire signed [NB_W-1:0] mu_gI = switched ? mu_gI_slow : mu_gI_fast;
     wire signed [NB_W-1:0] mu_gQ = switched ? mu_gQ_slow : mu_gQ_fast;
@@ -144,7 +135,7 @@ module update_lms #(
     always @(posedge clk) begin
         if (rst) begin
             samp      <= {KW{1'b0}};
-            frame_cnt <= 8'd0;
+            frame_cnt <= 16'd0; // AMPLIADO a 16 bits
             switched  <= 1'b0;
             o_valid   <= 1'b0;
             o_start   <= 1'b0;
@@ -161,20 +152,23 @@ module update_lms #(
             o_wQ    <= new_wQ;
             o_start <= i_start;
             o_valid <= 1'b1;
+            
             // Debug
             if (eff_samp < 4) begin
                 $display("[LMS] samp=%0d  grad=(%0d,%0d)  mu_g=(%0d,%0d)  w_new=(%0d,%0d)",
                         eff_samp, i_gI, i_gQ, mu_gI, mu_gQ, new_wI, new_wQ);
             end
+            
             // Avanzar contador de muestras
             samp <= (eff_samp == N1) ? {KW{1'b0}} : (eff_samp + 1'b1);
 
             // mu_switch: contar frames (se detecta al final de cada frame)
             if (eff_samp == N1 && !switched) begin
-                if (frame_cnt == N_SWITCH - 1)
+                // AHORA USA >= Y EL INPUT i_n_switch
+                if (frame_cnt >= i_n_switch - 1)
                     switched <= 1'b1;
                 else
-                    frame_cnt <= frame_cnt + 8'd1;
+                    frame_cnt <= frame_cnt + 16'd1;
             end
 
         end else begin

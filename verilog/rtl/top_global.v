@@ -24,6 +24,9 @@ module top_global #(
     input  wire                 rst,
     input  wire                 enable_div,
     input  wire [10:0]          sigma_scale,
+    input  wire [3:0]           mu_sh_init,
+    input  wire [3:0]           mu_sh_final,
+    input  wire [15:0]          n_switch,
 
     output wire                 clk_low,
 
@@ -514,10 +517,7 @@ module top_global #(
     update_lms #(
         .NB_W       (NB_INT),
         .NBF_W      (NBF_INT),
-        .N          (NFFT / 2),    
-        .MU_SH_INIT (7),           
-        .MU_SH_FINAL(9),          
-        .N_SWITCH   (200)          
+        .N          (NFFT / 2)        
     ) u_lms (
         .clk        (clk_fast),
         .rst        (rst),
@@ -525,6 +525,9 @@ module top_global #(
         .i_start    (grad_t_start),
         .i_gI       (grad_t_I),
         .i_gQ       (grad_t_Q),
+        .i_mu_sh_init  (mu_sh_init),
+        .i_mu_sh_final (mu_sh_final),
+        .i_n_switch    (n_switch),
         .o_valid    (lms_w_valid),
         .o_start    (lms_w_start),
         .o_wI       (lms_w_I),
