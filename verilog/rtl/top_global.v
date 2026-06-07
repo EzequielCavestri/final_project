@@ -136,7 +136,7 @@ module top_global_all #(
 
     // --- GRADIENTE ---
     // PHI_k = conj(X_hist) * E_k  — gradiente espectral del PBFDAF-LMS
-    // Latencia 2 ciclos desde ffte_out
+    // Latencia 2 ciclos desde ffte_out.i_we (1'b0)
     output wire                        grad_out_valid,  // 1 cuando PHI_k es válido
     output wire                        grad_out_start,  // 1 en primera muestra del frame
     output wire signed [NB_INT-1:0]    grad_out_re,     // PHI_k parte real
@@ -413,8 +413,8 @@ module top_global_all #(
         .i_X1_re   (hb_out_old_I),
         .i_X1_im   (hb_out_old_Q),
         // Puerto LMS activo — W0[k] actualizado por fft_pesos
-        //.i_we      (fft_w_valid), //RTL_ECUAL
-        .i_we      (1'b0),         // RTL_NO_ECUA
+        .i_we      (fft_w_valid), //RTL_ECUAL
+        //.i_we      (1'b0),         // RTL_NO_ECUA
         .i_wk      (cmul_eff_wk),
         .i_wsel    (1'b0),          // K_HIST=1: solo W0
         .i_W_re    (fft_w_I),

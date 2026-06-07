@@ -12,7 +12,7 @@ module top_tx (
         .rst (reset),
         .en  (i_en),
         .seed(9'h17F),
-        .bit (bI)
+        .o_bit (bI)
     );
 
     prbs9 prbs_q (
@@ -20,7 +20,7 @@ module top_tx (
         .rst (reset),
         .en  (i_en),
         .seed(9'h11D),
-        .bit (bQ)
+        .o_bit (bQ)
     );
 
     qpsk_mapper mapper_qpsk (
