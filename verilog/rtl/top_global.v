@@ -22,13 +22,12 @@ module top_global #(
     // --- Relojes y Control Esenciales ---
     input  wire                 clk_fast,
     input  wire                 rst,
-    input  wire                 enable_div,
     input  wire [10:0]          sigma_scale,
     input  wire [3:0]           mu_sh_init,
     input  wire [3:0]           mu_sh_final,
     input  wire [15:0]          n_switch,
 
-    output wire                 clk_low,
+    input wire                 clk_low,
 
     // --- SALIDAS ÚTILES DEL SISTEMA (Data Plane) ---
     // Muestras N..2N-1 ecualizadas útiles del frame (Salida del Filtro)
@@ -132,7 +131,7 @@ module top_global #(
     wire signed [NB_INT-1:0] lms_w_I;       
     wire signed [NB_INT-1:0] lms_w_Q;       
     wire                 lms_switched;  
-    wire [7:0]           lms_frame_cnt; 
+    wire [15:0]           lms_frame_cnt; 
     wire                 zpp_out_valid;
     wire                 zpp_out_start;
     wire signed [NB_INT-1:0] zpp_out_wI;
@@ -148,11 +147,7 @@ module top_global #(
     // ESTRUCTURA INTERNA
     // ============================================================
     
-    clock_div2 u_div2 (
-        .i_clk_fast(clk_fast),
-        .i_enable  (enable_div),
-        .o_clk_low (clk_low)
-    );
+  
 
     reg i_en_tx;
     always @(posedge clk_low) begin

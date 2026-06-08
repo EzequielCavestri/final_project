@@ -38,14 +38,14 @@ module top_ch #(
     // Ratio |H|max/|H|min = 10x — ISI moderada, manejable en Q17.10
    
    
-   //parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
-    //9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd45, 9'sd110,
-    //9'sd45, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
-  //},
    parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
-        9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd110,
-        9'sd45, 9'sd30, 9'sd0, 9'sd0, 9'sd0, 9'sd0
+    9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd45, 9'sd110,
+    9'sd45, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
   },
+   //parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
+    //9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd128,
+    //9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
+   //},
 
     parameter [L_CH*CWIDTH-1:0] H_IMAG_INIT = {L_CH{9'sd0}}
 

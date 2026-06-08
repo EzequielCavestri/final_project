@@ -11,15 +11,17 @@ module top_fpga (
     // ============================================================
     wire clk_fast;
     wire locked;
+    wire clk_low;   
 
     // El Clocking Wizard configurado como 'Differential' ya contiene el IBUFDS.
     // No agregues otro buffer externo para no tener errores de conexión.
     clk_wiz_0 u_clocks (
-        .clk_in1_p(sys_clk_p),
-        .clk_in1_n(sys_clk_n),
-        .clk_out1 (clk_fast),
-        .reset    (1'b0), 
-        .locked   (locked)
+    .clk_in1_p (sys_clk_p),
+    .clk_in1_n (sys_clk_n),
+    .clk_out1  (clk_fast),   // ← clk_out1 = 100 MHz
+    .clk_out2  (clk_low),    // ← clk_out2 = 50 MHz
+    .reset     (1'b0),
+    .locked    (locked)
     );
 
     // ============================================================
@@ -27,7 +29,6 @@ module top_fpga (
     // ============================================================
     wire        vio_rst;
     wire [10:0] vio_sigma_scale;
-    wire        vio_enable_div;
     wire [3:0]  vio_mu_init;
     wire [3:0]  vio_mu_final;
     wire [15:0] vio_n_switch;
@@ -36,10 +37,9 @@ module top_fpga (
         .clk        (clk_fast),
         .probe_out0 (vio_rst),
         .probe_out1 (vio_sigma_scale),
-        .probe_out2 (vio_enable_div),
-        .probe_out3 (vio_mu_init),
-        .probe_out4 (vio_mu_final),
-        .probe_out5 (vio_n_switch)
+        .probe_out2 (vio_mu_init),
+        .probe_out3 (vio_mu_final),
+        .probe_out4 (vio_n_switch)
     );
 
     // ============================================================
@@ -77,9 +77,8 @@ module top_fpga (
     ) u_dsp_core (
         .clk_fast     (clk_fast),
         .rst          (sys_rst_safe),
-        .enable_div   (vio_enable_div),
         .sigma_scale  (vio_sigma_scale),
-        .clk_low      (), 
+        .clk_low      (clk_low), 
         .dn_out_valid (dn_out_valid),
         .dn_out_start (dn_out_start),
         .dn_out_I     (dn_out_I),

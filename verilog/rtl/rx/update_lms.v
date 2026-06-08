@@ -66,7 +66,7 @@ module update_lms #(
     integer ii;
     initial begin
         for (ii = 0; ii < N; ii = ii + 1) begin
-            w_re[ii] = (ii == 0) ? 17'sd1024 : {NB_W{1'b0}};
+            w_re[ii] = (ii == 7) ? 17'sd1024 : {NB_W{1'b0}};
             w_im[ii] = {NB_W{1'b0}};
         end
     end
