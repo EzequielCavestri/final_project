@@ -1,11 +1,11 @@
-`timescale 1ns/1ps
+`timescale 1us/1ns
 
 module top_ch #(
     // ================================================================
     // Datos y coeficientes (SIN integer)
     // ================================================================
     parameter DWIDTH      = 9,  
-    parameter L_CH        = 13,  
+    parameter L_CH        = 15,  
     parameter CWIDTH      = 9,   
     parameter DATA_F      = 7,   
     parameter COEF_F      = 7,   
@@ -36,13 +36,39 @@ module top_ch #(
     // Para verificacion del lag del pipeline sin ISI
         // Canal ISI 3 taps: h[5]=45, h[6]=110 (tap principal), h[7]=45 en Q7
     // Ratio |H|max/|H|min = 10x — ISI moderada, manejable en Q17.10
-    parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
-    9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd45, 9'sd110,
-    9'sd45, 9'sd0, 9'sd0, 9'sd0, 9'sd0, 9'sd0
-    },
+    // CANAL DE PRUEBA PARA PBFDAF 2 PARTICIONES
+    // Longitud efectiva: 24 muestras
+    //
+    // h[0]  = +104 + j0
+    // h[3]  =  +26 + j10
+    // h[7]  =  -14 + j7
+    // h[17] =  +12 - j8
+    // h[23] =   -6 + j4
+    //
+    // Q7: coef / 128
+    //
+    // Este canal:
+    // - tiene ISI dentro de la primera partición: taps 0, 3, 7
+    // - fuerza W1 con ecos después de N=16: taps 17, 23
+    // - no es tan agresivo como para saturar fácilmente
+    // ================================================================
+parameter [L_CH*CWIDTH-1:0] H_REAL_INIT = {
+     9'sd10,  9'sd0,  -9'sd14,  9'sd0,
+      9'sd0,  9'sd0,   9'sd0,   9'sd18,
+      9'sd0,  9'sd0,   9'sd0,   9'sd0,
+      9'sd0,  9'sd0,   9'sd18,  9'sd0,
+      9'sd0,  9'sd0,  -9'sd24,  9'sd0,
+      9'sd0,  9'sd32,  9'sd0,   9'sd96
+},
 
-
-    parameter [L_CH*CWIDTH-1:0] H_IMAG_INIT = {L_CH{9'sd0}}
+parameter [L_CH*CWIDTH-1:0] H_IMAG_INIT = {
+    -9'sd8,   9'sd0,   9'sd10,  9'sd0,
+      9'sd0,  9'sd0,   9'sd0,   9'sd10,
+      9'sd0,  9'sd0,   9'sd0,   9'sd0,
+      9'sd0,  9'sd0,  -9'sd12,  9'sd0,
+      9'sd0,  9'sd0,   9'sd16,  9'sd0,
+      9'sd0,  9'sd12,  9'sd0,   9'sd0
+}
 
 )(
     input  wire                        clk,

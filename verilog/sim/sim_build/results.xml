@@ -1,6 +1,24 @@
 <testsuites name="results">
   <testsuite name="all" package="all">
-    <property name="random_seed" value="1776654243" />
-    <testcase name="ber_convergencia" classname="test_top" file="C:\Users\JulianaMaidana\final_project\verilog\sim\test_top.py" lineno="55" time="11623.55175280571" sim_time_ns="2000200.0" ratio_time="172.08165305558938" />
+    <property name="random_seed" value="1781152645" />
+    <testcase name="test_medir_delay" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="242" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
+    <testcase name="test_convergencia" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="294" time="112.43555331230164" sim_time_ns="200600.0" ratio_time="1784.1331686500648" />
+    <testcase name="ber_convergencia" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="371" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
+    <testcase name="test_debug_pipeline" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="450" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
+    <testcase name="test_medir_tap_central" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="726" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
+    <testcase name="test_trace_lms_alignment" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="805" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
+    <testcase name="test_debug_full_loop" classname="test_top" file="C:\Users\Usuario\OneDrive - frc.utn.edu.ar\Documentos\6_Proyecto Final\Repo\final_project\verilog\sim\test_top.py" lineno="1428" time="0" sim_time_ns="0" ratio_time="0">
+      <skipped />
+    </testcase>
   </testsuite>
 </testsuites>

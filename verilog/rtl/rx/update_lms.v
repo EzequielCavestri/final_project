@@ -38,7 +38,9 @@ module update_lms #(
     parameter integer N           = 16,
     parameter integer MU_SH_INIT  = 6,
     parameter integer MU_SH_FINAL = 8,
-    parameter integer N_SWITCH    = 200
+    parameter integer N_SWITCH    = 200,
+    parameter integer INIT_TAP    = 0,       // tap del impulso inicial
+    parameter signed [NB_W-1:0] INIT_VAL = 1024  // valor del impulso (0 = partición sin impulso)
 )(
     input  wire                    clk,
     input  wire                    rst,
@@ -48,6 +50,9 @@ module update_lms #(
     input  wire                    i_start,
     input  wire signed [NB_W-1:0]  i_gI,
     input  wire signed [NB_W-1:0]  i_gQ,
+
+    // NLMS: shift extra de block_power (0 = canal de referencia)
+    input  wire [4:0]              i_mu_extra,
 
     // Salida: w_new hacia ZERO_PAD_PESOS (N muestras por frame)
     output reg                     o_valid,
@@ -75,7 +80,7 @@ module update_lms #(
     integer ii;
     initial begin
         for (ii = 0; ii < N; ii = ii + 1) begin
-            w_re[ii] = (ii == 0) ? 17'sd1024 : {NB_W{1'b0}};
+            w_re[ii] = (ii == INIT_TAP) ? INIT_VAL : {NB_W{1'b0}};
             w_im[ii] = {NB_W{1'b0}};
         end
     end
@@ -97,25 +102,21 @@ module update_lms #(
     wire [KW-1:0] eff_samp = (i_valid && i_start) ? {KW{1'b0}} : samp;
 
     // ============================================================
-    // Shift de mu: pre-calcular ambas versiones y seleccionar
-    // Vivado sintetiza esto como un mux, no como shift variable
-    // Costo: ~17 LUT2
+    // Shift de mu: NLMS dinámico
+    //   sh_eff = shift_base(annealing) + mu_extra(potencia)
+    //   mu_extra se latchea por frame (estable durante las N muestras).
+    //   Barrel shift con truncación hacia cero (sin sesgo).
     // ============================================================
-    // Truncacion hacia cero (sin sesgo):
-    //   +612 >>> 11 = 0   (igual que floor, OK)
-    //   -612 >>> 11 = -1  (floor), corregido a 0 con truncation-toward-zero
-    //   Implementacion: si negativo, negar → shift → negar
-    wire signed [NB_W-1:0] mu_gI_fast = i_gI[NB_W-1] ?
-        -($signed(-i_gI) >>> MU_SH_INIT) : ($signed(i_gI) >>> MU_SH_INIT);
-    wire signed [NB_W-1:0] mu_gI_slow = i_gI[NB_W-1] ?
-        -($signed(-i_gI) >>> MU_SH_FINAL) : ($signed(i_gI) >>> MU_SH_FINAL);
-    wire signed [NB_W-1:0] mu_gQ_fast = i_gQ[NB_W-1] ?
-        -($signed(-i_gQ) >>> MU_SH_INIT) : ($signed(i_gQ) >>> MU_SH_INIT);
-    wire signed [NB_W-1:0] mu_gQ_slow = i_gQ[NB_W-1] ?
-        -($signed(-i_gQ) >>> MU_SH_FINAL) : ($signed(i_gQ) >>> MU_SH_FINAL);
+    reg [4:0] mu_extra_lat;       // latch del shift extra por frame
 
-    wire signed [NB_W-1:0] mu_gI = switched ? mu_gI_slow : mu_gI_fast;
-    wire signed [NB_W-1:0] mu_gQ = switched ? mu_gQ_slow : mu_gQ_fast;
+    wire [4:0] sh_base = switched ? MU_SH_FINAL[4:0] : MU_SH_INIT[4:0];
+    wire [5:0] sh_sum  = {1'b0, sh_base} + {1'b0, mu_extra_lat};
+    wire [4:0] sh_eff  = (sh_sum > 6'd30) ? 5'd30 : sh_sum[4:0];   // clamp seguro
+
+    wire signed [NB_W-1:0] mu_gI = i_gI[NB_W-1] ?
+        -($signed(-i_gI) >>> sh_eff) : ($signed(i_gI) >>> sh_eff);
+    wire signed [NB_W-1:0] mu_gQ = i_gQ[NB_W-1] ?
+        -($signed(-i_gQ) >>> sh_eff) : ($signed(i_gQ) >>> sh_eff);
 
     // ============================================================
     // Suma con 1 bit de guardia para detectar overflow
@@ -146,11 +147,16 @@ module update_lms #(
             samp      <= {KW{1'b0}};
             frame_cnt <= 8'd0;
             switched  <= 1'b0;
+            mu_extra_lat <= 5'd0;
             o_valid   <= 1'b0;
             o_start   <= 1'b0;
             o_wI      <= {NB_W{1'b0}};
             o_wQ      <= {NB_W{1'b0}};
         end else if (i_valid) begin
+
+            // NLMS: latchear el shift extra al inicio del frame
+            if (i_start)
+                mu_extra_lat <= i_mu_extra;
 
             // Actualizar banco de pesos
             w_re[eff_samp] <= new_wI;
@@ -163,8 +169,8 @@ module update_lms #(
             o_valid <= 1'b1;
             // Debug
             if (eff_samp < 4) begin
-                $display("[LMS] samp=%0d  grad=(%0d,%0d)  mu_g=(%0d,%0d)  w_new=(%0d,%0d)",
-                        eff_samp, i_gI, i_gQ, mu_gI, mu_gQ, new_wI, new_wQ);
+                $display("[LMS %m] samp=%0d sh=%0d(+%0d) grad=(%0d,%0d) mu_g=(%0d,%0d) w=(%0d,%0d)",
+                        eff_samp, sh_eff, mu_extra_lat, i_gI, i_gQ, mu_gI, mu_gQ, new_wI, new_wQ);
             end
             // Avanzar contador de muestras
             samp <= (eff_samp == N1) ? {KW{1'b0}} : (eff_samp + 1'b1);

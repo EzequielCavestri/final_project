@@ -71,11 +71,16 @@ module cmul_pbfdaf #(
     // Puerto de escritura de pesos — desde UPDATE_LMS
     // Dejar sin conectar (flotantes = 0) mientras no haya LMS.
     // -------------------------------------------------------
-    input  wire                      i_we,      // write enable
-    input  wire [$clog2(NFFT)-1:0]  i_wk,      // índice bin k
-    input  wire                      i_wsel,    // 0=W0, 1=W1
-    input  wire signed [NB_W-1:0]   i_W_re,    // peso Re a escribir
-    input  wire signed [NB_W-1:0]   i_W_im,    // peso Im a escribir
+    // Un puerto por partición. Ambos pueden escribir el MISMO bin en el
+    // MISMO ciclo porque van a arrays separados (W0 y W1).
+    input  wire                      i_we0,     // write enable W0 (X_curr)
+    input  wire [$clog2(NFFT)-1:0]  i_wk0,     // índice bin k (W0)
+    input  wire signed [NB_W-1:0]   i_W0_re,   // peso Re W0
+    input  wire signed [NB_W-1:0]   i_W0_im,   // peso Im W0
+    input  wire                      i_we1,     // write enable W1 (X_old)
+    input  wire [$clog2(NFFT)-1:0]  i_wk1,     // índice bin k (W1)
+    input  wire signed [NB_W-1:0]   i_W1_re,   // peso Re W1
+    input  wire signed [NB_W-1:0]   i_W1_im,   // peso Im W1
 
     // -------------------------------------------------------
     // Salida — hacia la IFFT
@@ -119,15 +124,18 @@ module cmul_pbfdaf #(
     // ============================================================
     // Puerto de escritura de pesos (síncrono)
     // ============================================================
+    // Puerto 0 → W0
     always @(posedge clk) begin
-        if (i_we) begin
-            if (i_wsel == 1'b0) begin
-                W0_re[i_wk] <= i_W_re;
-                W0_im[i_wk] <= i_W_im;
-            end else begin
-                W1_re[i_wk] <= i_W_re;
-                W1_im[i_wk] <= i_W_im;
-            end
+        if (i_we0) begin
+            W0_re[i_wk0] <= i_W0_re;
+            W0_im[i_wk0] <= i_W0_im;
+        end
+    end
+    // Puerto 1 → W1
+    always @(posedge clk) begin
+        if (i_we1) begin
+            W1_re[i_wk1] <= i_W1_re;
+            W1_im[i_wk1] <= i_W1_im;
         end
     end
 

@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1us/1ns
 `default_nettype none
 
 // ============================================================
@@ -36,7 +36,7 @@
 
 module xhist_delay #(
     parameter integer NB_W  = 17,
-    parameter integer DELAY = 118
+    parameter integer DELAY = 120
 )(
     input  wire                    clk,
     input  wire                    rst,

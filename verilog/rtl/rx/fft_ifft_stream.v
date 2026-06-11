@@ -1,4 +1,4 @@
-`timescale 1ns/1ps
+`timescale 1us/1ns
 `default_nettype none
 
 module fft_ifft_stream #(
@@ -36,6 +36,15 @@ module fft_ifft_stream #(
 
     assign o_in_ready = 1'b1;
 
+    function [LOGN-1:0] bitrev;
+        input [LOGN-1:0] x;
+        integer b;
+        begin
+            for (b=0; b<LOGN; b=b+1)
+                bitrev[b] = x[LOGN-1-b];
+        end
+    endfunction
+
     // narrow->wide
     wire signed [NB_W-1:0] inI_w = ($signed({{(NB_W-NB_IN){i_xI[NB_IN-1]}}, i_xI})) <<< (NBF_W - NBF_IN);
     wire signed [NB_W-1:0] inQ_w = ($signed({{(NB_W-NB_IN){i_xQ[NB_IN-1]}}, i_xQ})) <<< (NBF_W - NBF_IN);
@@ -48,7 +57,11 @@ module fft_ifft_stream #(
     reg signed [NB_W*32-1:0] in0I, in0Q;
     reg signed [NB_W*32-1:0] in1I, in1Q;
 
-    wire [9:0] in_base = in_idx * NB_W;
+    // DIT radix-2 small-to-large: requiere entrada en orden bit-reversed
+    // para entregar salida en orden natural. Antes se hacía el bit-reversal
+    // en la salida, lo que NO implementaba una FFT/IFFT correcta.
+    wire [4:0] wr_idx  = (REORDER_BITREV!=0) ? bitrev(in_idx) : in_idx;
+    wire [9:0] in_base = wr_idx * NB_W;
 
     reg take0, take1;
 
@@ -179,16 +192,8 @@ module fft_ifft_stream #(
     reg send_bank;
     reg [4:0] send_idx;
 
-    function [LOGN-1:0] bitrev;
-        input [LOGN-1:0] x;
-        integer b;
-        begin
-            for (b=0; b<LOGN; b=b+1)
-                bitrev[b] = x[LOGN-1-b];
-        end
-    endfunction
-
-    wire [4:0] rd_idx = (REORDER_BITREV!=0) ? bitrev(send_idx) : send_idx;
+    // Salida natural. El bit-reversal ya se aplicó al cargar el frame.
+    wire [4:0] rd_idx = send_idx;
     wire [9:0] out_base = rd_idx * NB_W;
 
     wire signed [NB_W-1:0] curI = (send_bank==1'b0) ? out0I[out_base +: NB_W] : out1I[out_base +: NB_W];

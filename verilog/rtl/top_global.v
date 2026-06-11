@@ -1,8 +1,8 @@
-`timescale 1ns/1ps
+`timescale 1us/1ns
 `default_nettype none
 
 // ============================================================
-// top_global_all  v14 (loop LMS cerrado: fft_pesos → cmul_pbfdaf)
+// top_global_all  v15 (PBFDAF K=2 particiones: W0 + W1 adaptivos)
 //
 // Cadena completa:
 //   TX -> CH -> OS -> FIFO -> FFT -> HB -> CMUL -> IFFT -> DN -> SLICER -> ZPE -> FFT_ERROR
@@ -25,7 +25,14 @@
 // NUEVO en v14:
 //   - fft_pesos conectado al puerto de escritura del cmul_pbfdaf
 //   - Contador wr_cnt convierte fft_w_valid/start → i_we/i_wk
-//   - Loop LMS completamente cerrado
+//   - Loop LMS completamente cerrado (1 partición)
+// NUEVO en v15:
+//   - SEGUNDA PARTICIÓN (X_old): rama de update espejo
+//       u_xhd_old → u_grad1 → u_ifft_grad1 → u_proy1 → u_lms1
+//                 → u_zpp1 → u_fft_pesos1  →  W1 del CMUL
+//   - cmul_pbfdaf con DOS puertos de escritura (W0 y W1 concurrentes)
+//   - update_lms parametrizado: u_lms (impulso tap0) / u_lms1 (cero)
+//   - W0 y W1 salen en lockstep → comparten cmul_eff_wk / cmul_wr_cnt
 // ============================================================
 
 module top_global_all #(
@@ -171,13 +178,18 @@ module top_global_all #(
     output wire signed [NB_INT-1:0]    zpp_out_wI,
     output wire signed [NB_INT-1:0]    zpp_out_wQ,
 
-    // --- FFT_PESOS (u_fft_pesos) ---
+    // --- FFT_PESOS (u_fft_pesos) — W0 ---
     // W_k = FFT([w|0..0]) — coeficientes en frecuencia
-    // Próximo: tabla_w (RAM ping-pong → cmul)
     output wire                        fft_w_valid,
     output wire                        fft_w_start,
     output wire signed [NB_INT-1:0]    fft_w_I,
-    output wire signed [NB_INT-1:0]    fft_w_Q
+    output wire signed [NB_INT-1:0]    fft_w_Q,
+
+    // --- FFT_PESOS1 (u_fft_pesos1) — W1 (partición X_old) ---
+    output wire                        fft_w1_valid,
+    output wire                        fft_w1_start,
+    output wire signed [NB_INT-1:0]    fft_w1_I,
+    output wire signed [NB_INT-1:0]    fft_w1_Q
 );
 
     // ============================================================
@@ -368,13 +380,29 @@ module top_global_all #(
     );
 
     // ============================================================
+    // Wires de la PARTICIÓN 1 (rama de update de W1, fuente X_old)
+    // ============================================================
+    wire                     xhd_old_valid, xhd_old_start;
+    wire signed [NB_INT-1:0] xhd_old_re,    xhd_old_im;
+    wire                     grad1_valid,   grad1_start;
+    wire signed [NB_INT-1:0] grad1_re,      grad1_im;
+    wire                     ifft_grad1_valid, ifft_grad1_start, ifft_grad1_rdy;
+    wire signed [NB_INT-1:0] ifft_grad1_I,     ifft_grad1_Q;
+    wire                     grad1_t_valid, grad1_t_start;
+    wire signed [NB_INT-1:0] grad1_t_I,     grad1_t_Q;
+    wire                     lms1_w_valid,  lms1_w_start;
+    wire signed [NB_INT-1:0] lms1_w_I,      lms1_w_Q;
+    wire                     zpp1_out_valid, zpp1_out_start;
+    wire signed [NB_INT-1:0] zpp1_out_wI,    zpp1_out_wQ;
+    wire                     fft_w1_rdy;
+
+    // ============================================================
     // Contador wr_cnt para escribir W_new en cmul_pbfdaf
     //
-    //   fft_pesos emite fft_w_valid/start/I/Q (32 bins/frame).
-    //   El CMUL tiene un puerto de escritura i_we/i_wk/i_W_re/im.
-    //   wr_cnt convierte el streaming de fft_pesos en direcciones:
-    //     fft_w_start → wr_cnt=0, luego incrementa con fft_w_valid.
-    //   i_wsel=0 → escribe siempre en W0 (única partición K_HIST=1).
+    //   fft_pesos (W0) y fft_pesos1 (W1) emiten en LOCKSTEP:
+    //   misma latencia, mismo bin, mismo ciclo. Por eso un único
+    //   contador alcanza para indexar AMBOS puertos de escritura.
+    //     fft_w_start → cmul_eff_wk=0, luego incrementa con fft_w_valid.
     // ============================================================
     reg  [$clog2(NFFT)-1:0] cmul_wr_cnt;
     wire [$clog2(NFFT)-1:0] cmul_eff_wk = (fft_w_valid && fft_w_start)
@@ -394,8 +422,8 @@ module top_global_all #(
     // ============================================================
     // CMUL_PBFDAF  (clk_fast)
     //   Y[k] = W0[k]·X_curr[k] + W1[k]·X_old[k]
-    //   Inicialización: W0=identidad, W1=0  →  Y = X_curr
-    //   Desde v14: W0 se actualiza frame a frame desde fft_pesos
+    //   v15: W0 y W1 se actualizan frame a frame desde fft_pesos/fft_pesos1
+    //   Dos puertos de escritura concurrentes (arrays separados).
     // ============================================================
     wire [$clog2(NFFT)-1:0] cmul_samp_dbg;
 
@@ -412,13 +440,16 @@ module top_global_all #(
         .i_X0_im   (hb_out_curr_Q),
         .i_X1_re   (hb_out_old_I),
         .i_X1_im   (hb_out_old_Q),
-        // Puerto LMS activo — W0[k] actualizado por fft_pesos
-        .i_we      (fft_w_valid), //RTL_ECUAL
-        //.i_we      (1'b0),         // RTL_NO_ECUA
-        .i_wk      (cmul_eff_wk),
-        .i_wsel    (1'b0),          // K_HIST=1: solo W0
-        .i_W_re    (fft_w_I),
-        .i_W_im    (fft_w_Q),
+        // Puerto W0 — partición X_curr (fft_pesos)
+        .i_we0     (fft_w_valid),
+        .i_wk0     (cmul_eff_wk),
+        .i_W0_re   (fft_w_I),
+        .i_W0_im   (fft_w_Q),
+        // Puerto W1 — partición X_old (fft_pesos1), lockstep con W0
+        .i_we1     (fft_w1_valid),
+        .i_wk1     (cmul_eff_wk),
+        .i_W1_re   (fft_w1_I),
+        .i_W1_im   (fft_w1_Q),
         .o_valid   (cmul_out_valid),
         .o_start   (cmul_out_start),
         .o_yI      (cmul_out_I),
@@ -490,7 +521,6 @@ module top_global_all #(
     //             e      = yhat - y            →  error para el LMS
     //
     //   Latencia: 1 ciclo (registro de salida).
-    //   Próximo en cadena: FFT_ERROR (bloque LMS, no implementado aún).
     // ============================================================
     slicer_qpsk #(
         .NB_W (WN),
@@ -516,10 +546,6 @@ module top_global_all #(
     //
     //   Entrada:  e_blk  = sl_out_e_*  (N errores del slicer)
     //   Salida:   frame  = [0...0 | e_blk]  (2N muestras para FFT_ERROR)
-    //
-    //   FSM interna: RECV(N) → ZEROS(N) → ERROR(N)
-    //   Latencia: N ciclos de recepción antes de emitir el frame
-    //   Próximo en cadena: FFT_ERROR (rama LMS).
     // ============================================================
     zero_pad_error #(
         .NB_W (WN),
@@ -541,12 +567,8 @@ module top_global_all #(
     // FFT_ERROR  (u_fft_error)
     //
     //   Entrada:  zpe_out_*  (frame 2N = [0..0 | e_blk])
-    //   Salida:   E_k        (espectro del error, dominio frecuencia)
-    //
-    //   Reuso directo de fft_ifft_stream con i_inverse=0.
-    //   Mismos parámetros que u_fft (cadena principal).
-    //   Entrada en WN bits (9), salida en NB_INT bits (17).
-    //   Próximo en cadena: GRADIENTE (PHI = conj(X_hist) * E_k).
+    //   Salida:   E_k        (espectro del error, único, compartido
+    //                         por AMBAS particiones del gradiente)
     // ============================================================
     fft_ifft_stream #(
         .NFFT(NFFT), .LOGN(LOGN),
@@ -571,23 +593,36 @@ module top_global_all #(
     );
 
     // ============================================================
-    // XHIST_DELAY  (u_xhd)
-    //
-    //   Retrasa X_hist (hb_out_X_old_re/im) exactamente 118 ciclos
-    //   para sincronizarlo con la salida de la FFT_ERROR (ffte_out).
-    //
-    //   Por qué 118 ciclos:
-    //     El history buffer emite X_hist junto con la FFT principal.
-    //     El error E_k tarda 118 ciclos más en calcularse:
-    //       CMUL + IFFT + DN + SLICER + ZPE + FFT_ERROR = 118 ciclos
-    //     Sin este retardo, cuando E_k llega al GRADIENTE,
-    //     X_hist del mismo frame ya pasó hace ~4 frames.
-    //
-    //   VERIFICACION en waveform:
-    //     xhd_out_start y ffte_out_start deben aparecer en el
-    //     MISMO ciclo exacto. Si hay diferencia, ajustar DELAY.
-    //
-    //   Próximo en cadena: GRADIENTE (PHI = conj(X_hist) * E_k)
+    // BLOCK_POWER  (u_bpow) — estimación de potencia para NLMS
+    //   P = Σ|X|² sobre la salida de la FFT principal (fft_out).
+    //   o_mu_extra → shift extra que normaliza el paso de AMBAS
+    //   particiones (la potencia del canal es común a las dos).
+    //   CALIBRAR P_REF_MSB con el log [BPOW] (ver block_power.v).
+    // ============================================================
+    wire [4:0] nlms_mu_extra;
+
+    block_power #(
+        .NB_W      (NB_INT),
+        .NFFT      (NFFT),
+        .BETA      (4),
+        .P_REF_MSB (30),       // ← CALIBRAR con [BPOW]
+        .MU_EXTRA_MAX(8)
+    ) u_bpow (
+        .clk     (clk_fast),
+        .rst     (rst),
+        .i_valid (fft_out_valid),
+        .i_start (fft_out_start),
+        .i_xre   (fft_out_I),
+        .i_xim   (fft_out_Q),
+        .o_mu_extra(nlms_mu_extra)
+    );
+
+    // ============================================================
+    // ===================  PARTICIÓN 0  (W0, X_curr)  ============
+    // ============================================================
+
+    // ============================================================
+    // XHIST_DELAY  (u_xhd) — X_curr retrasado 118 ciclos
     // ============================================================
     xhist_delay #(
         .NB_W (NB_INT),
@@ -606,20 +641,7 @@ module top_global_all #(
     );
 
     // ============================================================
-    // GRADIENTE  (u_grad)
-    //
-    //   Calcula PHI_k = conj(X_hist) * E_k
-    //
-    //   Entradas sincronizadas (verificado en BLOQUE 11):
-    //     xhd_out  = X_hist retrasado 118 ciclos
-    //     ffte_out = E_k espectro del error
-    //
-    //   Control: ffte_out_valid/start definen el ritmo.
-    //   Cuando ffte_out_valid=1 → xhd_out_valid=1 siempre.
-    //
-    //   Latencia: 2 ciclos (pipeline de multiplicaciones)
-    //
-    //   Salida: grad_out → entrada de IFFT_GRAD (próximo módulo)
+    // GRADIENTE  (u_grad) — PHI0 = conj(X_curr) * E_k
     // ============================================================
     gradiente #(
         .NB_W (NB_INT),
@@ -640,15 +662,7 @@ module top_global_all #(
     );
 
     // ============================================================
-    // IFFT_GRAD  (u_ifft_grad)
-    //
-    //   PHI_k (dominio frecuencia) → phi(t) (dominio tiempo)
-    //
-    //   Reuso de fft_ifft_stream con i_inverse=1.
-    //   Mismos parámetros que u_fft_error.
-    //   Entrada:  grad_out_* (PHI_k, 32 muestras/frame en frecuencia)
-    //   Salida:   ifft_grad_* (phi(t), 32 muestras/frame en tiempo)
-    //   Próximo:  PROYECCION (discard_n)
+    // IFFT_GRAD  (u_ifft_grad) — PHI0_k → phi0(t)
     // ============================================================
     wire ifft_grad_rdy;
 
@@ -675,19 +689,7 @@ module top_global_all #(
     );
 
     // ============================================================
-    // PROYECCION  (u_proy)
-    //
-    //   Restricción de causalidad PBFDAF:
-    //   phi(t) = IFFT(PHI_k) tiene 2N=32 muestras.
-    //   Solo las primeras N=16 (índices 0..N-1) son válidas
-    //   para actualizar un filtro causal de N taps.
-    //   Las últimas N muestras se descartan (alias/aliasing).
-    //
-    //   DIFERENCIA vs discard_n (cadena principal):
-    //     discard_n    → guarda [N..2N-1]  (segunda mitad)
-    //     keep_first_n → guarda [0..N-1]   (primera mitad) ← proyección
-    //
-    //   Próximo: UPDATE_LMS (u_lms) — w_new = w_old + mu*grad_t
+    // PROYECCION  (u_proy) — keep_first_n  [0..N-1]
     // ============================================================
     keep_first_n #(
         .NB_W (NB_INT),
@@ -708,28 +710,18 @@ module top_global_all #(
     );
 
     // ============================================================
-    // UPDATE_LMS  (u_lms)
-    //
-    //   Actualización de pesos del PBFDAF-LMS:
-    //     w_new[k] = sat( w_old[k] + (grad_t[k] >>> mu_sh_eff) )
-    //
-    //   mu_sh_eff conmuta automáticamente:
-    //     frames 0..N_SWITCH-1  → MU_SH_INIT=6  (mu≈0.016, arranque)
-    //     frames N_SWITCH..∞    → MU_SH_FINAL=8 (mu≈0.004, estable)
-    //
-    //   Entrada:  grad_t_* (N=16 muestras/frame de PROYECCION)
-    //   Salida:   lms_w_*  (w_new, N=16 muestras/frame → ZERO_PAD_PESOS)
-    //   Latencia: 1 ciclo
-    //
-    //   Salida lms_w_* conectada a ZERO_PAD_PESOS (v13).
+    // UPDATE_LMS  (u_lms) — partición 0
+    //   Inicialización: impulso centrado en tap 15 (INIT_TAP=15, INIT_VAL=1024)
     // ============================================================
     update_lms #(
         .NB_W       (NB_INT),
         .NBF_W      (NBF_INT),
         .N          (NFFT / 2),    // N=16
-        .MU_SH_INIT (7),           // mu≈0.002 — arranque conservador  --- 9
-        .MU_SH_FINAL(9),          // mu≈0.0005 — estado estable      ---- 11
-        .N_SWITCH   (200)          // igual que Python N_SWITCH=200    ----200
+        .MU_SH_INIT (8),
+        .MU_SH_FINAL(12),
+        .N_SWITCH   (300),
+        .INIT_TAP (7),     // era 15 — sacarlo de la costura P0/P1
+        .INIT_VAL (17'sd1024)    // impulso 1.0 en el centro → pre/post-cursor habilitados
     ) u_lms (
         .clk        (clk_fast),
         .rst        (rst),
@@ -737,6 +729,7 @@ module top_global_all #(
         .i_start    (grad_t_start),
         .i_gI       (grad_t_I),
         .i_gQ       (grad_t_Q),
+        .i_mu_extra (nlms_mu_extra),
         .o_valid    (lms_w_valid),
         .o_start    (lms_w_start),
         .o_wI       (lms_w_I),
@@ -746,16 +739,7 @@ module top_global_all #(
     );
 
     // ============================================================
-    // ZERO_PAD_PESOS  (u_zpp)
-    //
-    //   Prepara los pesos para la FFT de coeficientes:
-    //     Entrada : w_new[0..N-1]   (N=16 muestras de update_lms)
-    //     Salida  : [w[0..N-1] | 0..0]  (NFFT=32 muestras)
-    //
-    //   Operación streaming pura — FSM 3 estados:
-    //     S_PESOS → pasa w[k] directo
-    //     S_ZEROS → genera N ceros autónomos
-    //   Latencia: 1 ciclo
+    // ZERO_PAD_PESOS  (u_zpp) — partición 0
     // ============================================================
     zero_pad_pesos #(
         .NB_W (NB_INT),
@@ -775,15 +759,7 @@ module top_global_all #(
     );
 
     // ============================================================
-    // FFT_PESOS  (u_fft_pesos)
-    //
-    //   W_k = FFT( [w[0..N-1] | 0..0] )
-    //
-    //   Reuso de fft_ifft_stream con i_inverse=0.
-    //   Entrada/Salida en Q(17,10) — igual que u_fft_error.
-    //   La única diferencia con u_fft_error es que la entrada
-    //   viene en NB_INT=17 bits en lugar de WN=9 bits.
-    //   Próximo: tabla_w (RAM ping-pong → cmul)
+    // FFT_PESOS  (u_fft_pesos) — W0 = FFT([w0|0..0])
     // ============================================================
     wire fft_w_rdy;
 
@@ -808,6 +784,264 @@ module top_global_all #(
         .o_yI     (fft_w_I),
         .o_yQ     (fft_w_Q)
     );
+
+    // ============================================================
+    // ===================  PARTICIÓN 1  (W1, X_old)  =============
+    //   Rama de update espejo de la partición 0, cambiando:
+    //     - fuente de X: hb_out_old (en lugar de hb_out_curr)
+    //     - destino: puerto W1 del CMUL (i_we1/i_wk1/i_W1_*)
+    //     - init de pesos: CERO (INIT_VAL=0)
+    //   Mismo DELAY=118: X_old y X_curr salen del HB el mismo ciclo,
+    //   ambos deben alinearse con el mismo E_k.
+    // ============================================================
+
+    // --- XHIST_DELAY1: X_old retrasado 118 ---
+    xhist_delay #(
+        .NB_W (NB_INT),
+        .DELAY(118)
+    ) u_xhd_old (
+        .clk    (clk_fast),
+        .rst    (rst),
+        .i_valid(hb_out_valid),
+        .i_start(hb_out_start),
+        .i_xre  (hb_out_old_I),
+        .i_xim  (hb_out_old_Q),
+        .o_valid(xhd_old_valid),
+        .o_start(xhd_old_start),
+        .o_xre  (xhd_old_re),
+        .o_xim  (xhd_old_im)
+    );
+
+    // --- GRADIENTE1: PHI1 = conj(X_old) * E_k (mismo E_k) ---
+    gradiente #(
+        .NB_W (NB_INT),
+        .NBF_W(NBF_INT)
+    ) u_grad1 (
+        .clk    (clk_fast),
+        .rst    (rst),
+        .i_valid(ffte_out_valid),
+        .i_start(ffte_out_start),
+        .i_xre  (xhd_old_re),
+        .i_xim  (xhd_old_im),
+        .i_ere  (ffte_out_I),
+        .i_eim  (ffte_out_Q),
+        .o_valid(grad1_valid),
+        .o_start(grad1_start),
+        .o_phi_re(grad1_re),
+        .o_phi_im(grad1_im)
+    );
+
+    // --- IFFT_GRAD1: PHI1_k → phi1(t) ---
+    fft_ifft_stream #(
+        .NFFT(NFFT), .LOGN(LOGN),
+        .NB_IN(NB_INT),  .NBF_IN(NBF_INT),
+        .NB_W(NB_INT),   .NBF_W(NBF_INT),
+        .NB_OUT(NB_INT), .NBF_OUT(NBF_INT),
+        .BF_SCALE(0),
+        .REORDER_BITREV(REORDER_BITREV)
+    ) u_ifft_grad1 (
+        .i_clk    (clk_fast),
+        .i_rst    (rst),
+        .i_valid  (grad1_valid),
+        .i_start  (grad1_start),
+        .i_xI     (grad1_re),
+        .i_xQ     (grad1_im),
+        .i_inverse(1'b1),
+        .o_in_ready(ifft_grad1_rdy),
+        .o_start  (ifft_grad1_start),
+        .o_valid  (ifft_grad1_valid),
+        .o_yI     (ifft_grad1_I),
+        .o_yQ     (ifft_grad1_Q)
+    );
+
+    // --- PROYECCION1: keep_first_n [0..N-1] ---
+    keep_first_n #(
+        .NB_W (NB_INT),
+        .NBF_W(NBF_INT),
+        .NFFT (NFFT)
+    ) u_proy1 (
+        .clk    (clk_fast),
+        .rst    (rst),
+        .i_valid(ifft_grad1_valid),
+        .i_start(ifft_grad1_start),
+        .i_yI   (ifft_grad1_I),
+        .i_yQ   (ifft_grad1_Q),
+        .o_valid(grad1_t_valid),
+        .o_start(grad1_t_start),
+        .o_yI   (grad1_t_I),
+        .o_yQ   (grad1_t_Q),
+        .o_samp_idx()
+    );
+
+    // --- UPDATE_LMS1: partición 1, arranca en CERO ---
+    update_lms #(
+        .NB_W       (NB_INT),
+        .NBF_W      (NBF_INT),
+        .N          (NFFT / 2),
+        .MU_SH_INIT (8),
+        .MU_SH_FINAL(12),
+        .N_SWITCH   (300),
+        .INIT_VAL   (17'sd0)        // ← sin impulso: todos los taps en 0
+    ) u_lms1 (
+        .clk        (clk_fast),
+        .rst        (rst),
+        .i_valid    (grad1_t_valid),
+        .i_start    (grad1_t_start),
+        .i_gI       (grad1_t_I),
+        .i_gQ       (grad1_t_Q),
+        .i_mu_extra (nlms_mu_extra),
+        .o_valid    (lms1_w_valid),
+        .o_start    (lms1_w_start),
+        .o_wI       (lms1_w_I),
+        .o_wQ       (lms1_w_Q),
+        .o_switched (),
+        .o_frame_cnt()
+    );
+
+    // --- ZERO_PAD_PESOS1: [w1|0..0] ---
+    zero_pad_pesos #(
+        .NB_W (NB_INT),
+        .NBF_W(NBF_INT),
+        .NFFT (NFFT)
+    ) u_zpp1 (
+        .clk    (clk_fast),
+        .rst    (rst),
+        .i_valid(lms1_w_valid),
+        .i_start(lms1_w_start),
+        .i_wI   (lms1_w_I),
+        .i_wQ   (lms1_w_Q),
+        .o_valid(zpp1_out_valid),
+        .o_start(zpp1_out_start),
+        .o_wI   (zpp1_out_wI),
+        .o_wQ   (zpp1_out_wQ)
+    );
+
+    // --- FFT_PESOS1: W1 = FFT([w1|0..0]) ---
+    fft_ifft_stream #(
+        .NFFT(NFFT), .LOGN(LOGN),
+        .NB_IN (NB_INT), .NBF_IN (NBF_INT),
+        .NB_W  (NB_INT), .NBF_W  (NBF_INT),
+        .NB_OUT(NB_INT), .NBF_OUT(NBF_INT),
+        .BF_SCALE(0),
+        .REORDER_BITREV(REORDER_BITREV)
+    ) u_fft_pesos1 (
+        .i_clk    (clk_fast),
+        .i_rst    (rst),
+        .i_valid  (zpp1_out_valid),
+        .i_start  (zpp1_out_start),
+        .i_xI     (zpp1_out_wI),
+        .i_xQ     (zpp1_out_wQ),
+        .i_inverse(1'b0),
+        .o_in_ready(fft_w1_rdy),
+        .o_valid  (fft_w1_valid),
+        .o_start  (fft_w1_start),
+        .o_yI     (fft_w1_I),
+        .o_yQ     (fft_w1_Q)
+    );
+
+    // ============================================================
+    // DEBUG PIPELINE — señales clave para diagnóstico
+    // Borrar antes de síntesis
+    // ============================================================
+
+    // --- Dominio clk_low: canal y TX ---
+    always @(posedge clk_low) begin
+        if (i_valid_low)
+            $display("[CH_OUT] t=%0t  txI=%0d txQ=%0d  chI=%0d chQ=%0d",
+                $time, sI_tx, sQ_tx, sI_ch, sQ_ch);
+    end
+
+    // --- Dominio clk_fast: pipeline completo ---
+    always @(posedge clk_fast) begin
+
+        // OS buffer → FIFO: primer sample de cada bloque
+        if (os_valid && os_start)
+            $display("[OS_OUT]   t=%0t  I=%0d Q=%0d",
+                $time, os_I, os_Q);
+
+        // FIFO → FFT: primer sample de cada bloque
+        if (fft_in_valid && fft_in_start)
+            $display("[FFT_IN]   t=%0t  I=%0d Q=%0d",
+                $time, fft_in_I, fft_in_Q);
+
+        // FFT salida: primer bin de cada frame
+        if (fft_out_valid && fft_out_start)
+            $display("[FFT_OUT]  t=%0t  I=%0d Q=%0d",
+                $time, fft_out_I, fft_out_Q);
+
+        // HB salida: primer bin
+        if (hb_out_valid && hb_out_start)
+            $display("[HB_OUT]   t=%0t  currI=%0d currQ=%0d  oldI=%0d oldQ=%0d",
+                $time, hb_out_curr_I, hb_out_curr_Q,
+                       hb_out_old_I,  hb_out_old_Q);
+
+        // CMUL salida: primer bin
+        if (cmul_out_valid && cmul_out_start)
+            $display("[CMUL_OUT] t=%0t  I=%0d Q=%0d",
+                $time, cmul_out_I, cmul_out_Q);
+
+        // IFFT salida: primer sample
+        if (ifft_out_valid && ifft_out_start)
+            $display("[IFFT_OUT] t=%0t  I=%0d Q=%0d",
+                $time, ifft_out_I, ifft_out_Q);
+
+        // discard_n salida: primer sample útil
+        if (dn_out_valid && dn_out_start)
+            $display("[DN_OUT]   t=%0t  I=%0d Q=%0d",
+                $time, dn_out_I, dn_out_Q);
+
+        // Slicer: yhat y error
+        if (sl_out_valid && sl_out_start)
+            $display("[SL_START] t=%0t  yhatI=%0d yhatQ=%0d  eI=%0d eQ=%0d",
+                $time, sl_out_yhat_I, sl_out_yhat_Q,
+                       sl_out_e_I, sl_out_e_Q);
+
+        // FFT_ERROR: primer bin del espectro del error
+        if (ffte_out_valid && ffte_out_start)
+            $display("[FFTE_OUT] t=%0t  I=%0d Q=%0d",
+                $time, ffte_out_I, ffte_out_Q);
+
+        // XHD (P0): primer bin retrasado
+        if (xhd_out_valid && xhd_out_start)
+            $display("[XHD_OUT]  t=%0t  re=%0d im=%0d",
+                $time, xhd_out_re, xhd_out_im);
+
+        // XHD (P1): primer bin X_old retrasado — verificar lockstep con XHD_OUT
+        if (xhd_old_valid && xhd_old_start)
+            $display("[XHD_OLD]  t=%0t  re=%0d im=%0d",
+                $time, xhd_old_re, xhd_old_im);
+
+        // Gradiente P0: primer bin PHI0_k
+        if (grad_out_valid && grad_out_start)
+            $display("[GRAD_OUT] t=%0t  phiRe=%0d phiIm=%0d",
+                $time, grad_out_re, grad_out_im);
+
+        // Gradiente P1: primer bin PHI1_k
+        if (grad1_valid && grad1_start)
+            $display("[GRAD1]    t=%0t  phiRe=%0d phiIm=%0d",
+                $time, grad1_re, grad1_im);
+
+        // LMS P0: peso w0[0]
+        if (lms_w_valid && lms_w_start)
+            $display("[LMS_W0]   t=%0t  w0=%0d",
+                $time, lms_w_I);
+
+        // LMS P1: peso w1[0]
+        if (lms1_w_valid && lms1_w_start)
+            $display("[LMS_W1]   t=%0t  w1=%0d",
+                $time, lms1_w_I);
+
+        // FFT_PESOS P0: primer bin W0 escrito en CMUL
+        if (fft_w_valid && fft_w_start)
+            $display("[FFT_W]    t=%0t  W0re=%0d W0im=%0d",
+                $time, fft_w_I, fft_w_Q);
+
+        // FFT_PESOS P1: primer bin W1 escrito en CMUL — debe coincidir en t con FFT_W
+        if (fft_w1_valid && fft_w1_start)
+            $display("[FFT_W1]   t=%0t  W1re=%0d W1im=%0d",
+                $time, fft_w1_I, fft_w1_Q);
+
+    end
 
 endmodule
 
